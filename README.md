@@ -26,6 +26,50 @@ make
 make install
 ```
 
+## An Example
+
+```c
+#include <stdio.h>
+#include "a-json-library/ajson.h"
+#include "a-memory-library/aml_pool.h"
+
+int main() {
+    // Sample JSON string
+    const char* json_str = "{\"name\": \"John Doe\", \"age\": 30, \"is_student\": false}";
+
+    // Create a memory pool for efficient memory management
+    aml_pool_t *pool = aml_pool_init(1024);
+
+    // the ajson_parse is destructive to the input string
+    char *str = aml_pool_strdup(pool, json_str);
+
+    // Parse the JSON string
+    ajson_t *json = ajson_parse(pool, str, str+strlen(str));
+
+    // Check for parsing errors
+    if (ajson_is_error(json)) {
+        fprintf(stderr, "Error parsing JSON:\n");
+        ajson_dump_error(stderr, json);
+        aml_pool_destroy(pool);
+        return 1;
+    }
+
+    // Access elements in the JSON object
+    const char* name = ajsono_scan_str(json, "name", "unknown");
+    int age = ajsono_scan_int(json, "age", -1);
+    bool is_student = ajsono_scan_bool(json, "is_student", false);
+
+    // Print the values
+    printf("Name: %s\n", name);
+    printf("Age: %d\n", age);
+    printf("Is Student: %s\n", is_student ? "true" : "false");
+
+    // Clean up
+    aml_pool_destroy(pool);
+    return 0;
+}
+```
+
 ## Core Functions
 
 - **ajson_parse**: Parses JSON text into ajson structures.
