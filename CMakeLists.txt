@@ -43,7 +43,7 @@ target_include_directories(ajsonlibrary_static PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_include_directories(ajsonlibrary_static PUBLIC ${themacrolibrary_INCLUDE_DIRS})
-target_compile_options(ajsonlibrary_static PRIVATE -g -O3)
+target_compile_options(ajsonlibrary_static PRIVATE -O3)
 set_target_properties(ajsonlibrary_static PROPERTIES OUTPUT_NAME "ajsonlibrary_static")
 target_compile_options(ajsonlibrary_static PRIVATE -O3)
 
@@ -53,7 +53,7 @@ target_include_directories(ajsonlibrary PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_include_directories(ajsonlibrary PUBLIC ${themacrolibrary_INCLUDE_DIRS})
-target_compile_options(ajsonlibrary PRIVATE -g -O3)
+target_compile_options(ajsonlibrary PRIVATE -O3)
 set_target_properties(ajsonlibrary PROPERTIES OUTPUT_NAME "ajsonlibrary")
 target_compile_options(ajsonlibrary PRIVATE -O3)
 
