@@ -888,33 +888,82 @@ look_for_key:;
   };
 
 keyed_next_digit:;
-  /* add e/E support */
   ch = *p++;
-  while (ch >= '0' && ch <= '9')
+  while ((ch >= '0' && ch <= '9')) {
     ch = *p++;
-  if (ch != '.') {
-    p--;
-    *p = 0;
-    data_type = AJSON_NUMBER;
-    string_length = p - stringp;
-    AJSON_KEYED_ADD_STRING;
   }
+
+  if (ch == '.') {
+    // Transition to decimal number parsing
+    AJSON_KEYED_DECIMAL_NUMBER;
+  }
+
+  if (ch == 'e' || ch == 'E') {
+    // Handle optional + or - sign after e/E
+    ch = *p++;
+    if (ch == '+' || ch == '-') {
+      ch = *p++;
+    }
+
+    // Ensure valid digits after e/E
+    if (ch < '0' || ch > '9') {
+      AJSON_BAD_CHARACTER; // Invalid character after e/E
+    }
+
+    // Parse exponent digits
+    while (ch >= '0' && ch <= '9') {
+      ch = *p++;
+    }
+  }
+
+  // Step back to handle the end of the number properly
+  p--;
+  *p = 0; // Null-terminate the string
+
+  // At this point, the number is fully parsed
+  data_type = AJSON_NUMBER;
+  string_length = p - stringp;
+  AJSON_KEYED_ADD_STRING;
 
 keyed_decimal_number:;
   ch = *p++;
+
+  // Ensure there is at least one digit after the decimal point
   if (ch < '0' || ch > '9') {
     AJSON_BAD_CHARACTER;
   }
 
-  ch = *p++;
-  while (ch >= '0' && ch <= '9')
+  // Parse digits after the decimal point
+  while (ch >= '0' && ch <= '9') {
     ch = *p++;
+  }
 
-  p--;
-  *p = 0;
-  data_type = AJSON_DECIMAL;
-  string_length = p - stringp;
-  AJSON_KEYED_ADD_STRING;
+  // Check for scientific notation (e/E)
+  if (ch == 'e' || ch == 'E') {
+    // Transition to handle scientific notation
+    ch = *p++;
+    if (ch == '+' || ch == '-') {
+      // Handle optional + or - sign
+      ch = *p++;
+    }
+
+    // Ensure valid digits after e/E
+    if (ch < '0' || ch > '9') {
+      AJSON_BAD_CHARACTER; // Invalid character after e/E
+    }
+
+    // Parse digits in the exponent
+    while (ch >= '0' && ch <= '9') {
+      ch = *p++;
+    }
+  }
+
+  // Finalize the number parsing
+  p--;           // Step back to handle the next character
+  *p = 0;        // Null-terminate the string
+  data_type = AJSON_DECIMAL; // Assign the type
+  string_length = p - stringp; // Calculate the length
+  AJSON_KEYED_ADD_STRING;      // Add the number to the JSON structure
 
 start_value:;
   if (p >= ep) {
@@ -1195,33 +1244,91 @@ look_for_next_object:;
   };
 
 next_digit:;
-  /* add e/E support */
   ch = *p++;
-  while (ch >= '0' && ch <= '9')
+
+  // Parse digits before encountering a period or e/E
+  while (ch >= '0' && ch <= '9') {
     ch = *p++;
-  if (ch != '.') {
-    p--;
-    *p = 0;
-    data_type = AJSON_NUMBER;
-    string_length = p - stringp;
-    AJSON_ADD_STRING;
   }
+
+  if (ch == '.') {
+    // Handle the decimal portion
+    ch = *p++;
+    if (ch < '0' || ch > '9') {
+      AJSON_BAD_CHARACTER; // Invalid number if no digits after the decimal
+    }
+
+    while (ch >= '0' && ch <= '9') {
+      ch = *p++;
+    }
+  }
+
+  // Check for scientific notation (e/E)
+  if (ch == 'e' || ch == 'E') {
+    // Transition to handle scientific notation
+    ch = *p++;
+    if (ch == '+' || ch == '-') {
+      // Handle optional + or - sign
+      ch = *p++;
+    }
+
+    // Ensure valid digits after e/E
+    if (ch < '0' || ch > '9') {
+      AJSON_BAD_CHARACTER; // Invalid character after e/E
+    }
+
+    // Parse digits in the exponent
+    while (ch >= '0' && ch <= '9') {
+      ch = *p++;
+    }
+  }
+
+  // Finalize the number parsing
+  p--;           // Step back to handle the next character
+  *p = 0;        // Null-terminate the string
+  data_type = AJSON_NUMBER; // Assign the type
+  string_length = p - stringp; // Calculate the length
+  AJSON_ADD_STRING;           // Add the number to the JSON structure
 
 decimal_number:;
   ch = *p++;
+
+  // Ensure there is at least one digit after the decimal point
   if (ch < '0' || ch > '9') {
     AJSON_BAD_CHARACTER;
   }
 
-  ch = *p++;
-  while (ch >= '0' && ch <= '9')
+  // Parse digits after the decimal point
+  while (ch >= '0' && ch <= '9') {
     ch = *p++;
+  }
 
-  p--;
-  *p = 0;
-  data_type = AJSON_DECIMAL;
-  string_length = p - stringp;
-  AJSON_ADD_STRING;
+  // Check for scientific notation (e/E)
+  if (ch == 'e' || ch == 'E') {
+    // Transition to handle scientific notation
+    ch = *p++;
+    if (ch == '+' || ch == '-') {
+      // Handle optional + or - sign
+      ch = *p++;
+    }
+
+    // Ensure valid digits after e/E
+    if (ch < '0' || ch > '9') {
+      AJSON_BAD_CHARACTER; // Invalid character after e/E
+    }
+
+    // Parse digits in the exponent
+    while (ch >= '0' && ch <= '9') {
+      ch = *p++;
+    }
+  }
+
+  // Finalize the number parsing
+  p--;           // Step back to handle the next character
+  *p = 0;        // Null-terminate the string
+  data_type = AJSON_DECIMAL; // Assign the type
+  string_length = p - stringp; // Calculate the length
+  AJSON_ADD_STRING;           // Add the number to the JSON structure
 
 bad_character:;
   ajson_error_t *err =

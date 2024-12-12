@@ -769,7 +769,7 @@ static inline void ajsono_append(ajson_t *j, const char *key,
 
 static inline ajson_t *ajsono_path(aml_pool_t *pool, ajson_t *j, const char *path) {
   size_t num_paths = 0;
-  char **paths = aml_pool_split2(pool, &num_paths, '.', path);
+  char **paths = aml_pool_split_with_escape2(pool, &num_paths, '.', '\\', path);
   for( size_t i=0; i<num_paths; i++ ) {
     if(ajson_is_array(j)) {
       char *value = strchr(paths[i], '=');
