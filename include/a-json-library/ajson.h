@@ -39,12 +39,21 @@ typedef struct ajsono_s ajsono_t;
 
 /* This is the core function for parsing json.  This parser is not fully
  * compliant in that keys are expected to not include encodings (or if they do,
- * then you must encode the keys in the same way to match). */
+ * then you must encode the keys in the same way to match).  This is
+ * destructive to p/ep.  If you need to keep the original string, then you
+ * should duplicate it before calling this function. */
+ */
 ajson_t *ajson_parse(aml_pool_t *pool, char *p, char *ep);
+
+/* Similar to ajson_parse, but will duplicate the string and call ajson_parse
+ * so that it is non-destructive to the original string. */
+static inline
+ajson_t *ajson_parse_string(aml_pool_t *pool, const char *s);
 
 /* If the parse fails, the value returned will be marked such that
  * ajson_error returns true.  If this happens, you can dump it to the screen
- * or to a buffer.
+ * or to a buffer.  This should always be called after ajson_parse or
+ * ajson_parse_string.
  */
 static inline bool ajson_is_error(ajson_t *j);
 void ajson_dump_error(FILE *out, ajson_t *j);

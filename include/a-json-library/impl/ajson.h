@@ -56,6 +56,17 @@ struct ajsono_s {
   ajsono_t *previous;
 };
 
+static inline
+ajson_t *ajson_parse_string(aml_pool_t *pool, const char *s) {
+    if (!s)
+        return NULL;
+    size_t len = strlen(s);
+    char *p = aml_pool_dup(pool, s, len+1);
+    char *ep = p + len;
+    return ajson_parse(pool, p, ep);
+}
+
+
 static inline ajson_t *ajson_binary(aml_pool_t *pool, char *s,
                                         size_t length) {
   ajson_t *j = (ajson_t *)aml_pool_alloc(pool, sizeof(ajson_t));
