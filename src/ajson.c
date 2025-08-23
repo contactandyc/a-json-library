@@ -1,18 +1,6 @@
-/*
-Copyright 2019 Andy Curtis
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2019–2025 Andy Curtis <contactandyc@gmail.com>
+// SPDX-FileCopyrightText: 2024–2025 Knode.ai — technical questions: contact Andy (above)
+// SPDX-License-Identifier: Apache-2.0
 
 #include "a-json-library/ajson.h"
 
@@ -27,8 +15,6 @@ limitations under the License.
 #define AJSON_NATURAL_NUMBER_CASE                                            \
   '1' : case '2' : case '3' : case '4' : case '5' : case '6' : case '7'        \
       : case '8' : case '9'
-
-#define AJSON_NUMBER_CASE '0' : case AJSON_NATURAL_NUMBER_CASE
 
 #define AJSON_SPACE_CASE 32 : case 9 : case 13 : case 10
 
@@ -100,116 +86,786 @@ limitations under the License.
 #define AJSON_DECIMAL_NUMBER goto decimal_number
 #endif
 
-static void ajson_dump_object_to_buffer(aml_buffer_t *bh, _ajsono_t *a);
+/* Write only valid UTF-8 sequences from src[0..len) to FILE* out. */
+static void ajson_file_write_valid_utf8(FILE *out, const char *src, size_t len)
+{
+    size_t i = 0;
+    while (i < len) {
+        unsigned char c = (unsigned char)src[i];
+        if (c < 0x80) {
+            fputc(c, out);
+            i++;
+        }
+        else if ((c & 0xE0) == 0xC0 && (i+1) < len) {
+            unsigned char c2 = (unsigned char)src[i+1];
+            if ((c2 & 0xC0) == 0x80) {
+                fputc(c, out);
+                fputc(c2, out);
+                i += 2;
+            }
+            else
+                i++;
+        } else if ((c & 0xF0) == 0xE0 && (i+2) < len) {
+            unsigned char c2 = (unsigned char)src[i+1];
+            unsigned char c3 = (unsigned char)src[i+2];
+            if (((c2 & 0xC0) == 0x80) && ((c3 & 0xC0) == 0x80)) {
+                fputc(c, out);
+                fputc(c2, out);
+                fputc(c3, out);
+                i += 3;
+            } else
+                i++;
+        } else if ((c & 0xF8) == 0xF0 && (i+3) < len) {
+            unsigned char c2 = (unsigned char)src[i+1];
+            unsigned char c3 = (unsigned char)src[i+2];
+            unsigned char c4 = (unsigned char)src[i+3];
+            if (((c2 & 0xC0) == 0x80) && ((c3 & 0xC0) == 0x80) && ((c4 & 0xC0) == 0x80)) {
+                fputc(c, out);
+                fputc(c2, out);
+                fputc(c3, out);
+                fputc(c4, out);
+                i += 4;
+            } else
+                i++;
+        } else
+            i++;
+    }
+}
+
+
+/**
+ * ajson_copy_valid_utf8
+ *
+ * Copies bytes from 'src' (length 'len') to 'dest',
+ * skipping any invalid UTF-8 sequences.
+ * Returns a pointer to the position after the last valid
+ * byte written. (It does NOT automatically write a '\0'.)
+ */
+char *ajson_copy_valid_utf8(char *dest, const char *src, size_t len)
+{
+    size_t i = 0;
+    char *d = dest;
+
+    while (i < len) {
+        unsigned char c = (unsigned char)src[i];
+
+        // 1) Single-byte ASCII (0x00..0x7F):
+        if (c < 0x80) {
+            *d++ = c;
+            i++;
+        }
+        // 2) 2-byte sequence (110xxxxx 10xxxxxx):
+        else if ((c & 0xE0) == 0xC0 && (i + 1) < len) {
+            unsigned char c2 = (unsigned char)src[i + 1];
+            if ((c2 & 0xC0) == 0x80) {
+                *d++ = c;
+                *d++ = c2;
+                i += 2;
+            } else {
+                // Invalid second byte -> skip 'c'.
+                i++;
+            }
+        }
+        // 3) 3-byte sequence (1110xxxx 10xxxxxx 10xxxxxx):
+        else if ((c & 0xF0) == 0xE0 && (i + 2) < len) {
+            unsigned char c2 = (unsigned char)src[i + 1];
+            unsigned char c3 = (unsigned char)src[i + 2];
+            if (((c2 & 0xC0) == 0x80) &&
+                ((c3 & 0xC0) == 0x80))
+            {
+                *d++ = c;
+                *d++ = c2;
+                *d++ = c3;
+                i += 3;
+            } else {
+                i++;
+            }
+        }
+        // 4) 4-byte sequence (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx):
+        else if ((c & 0xF8) == 0xF0 && (i + 3) < len) {
+            unsigned char c2 = (unsigned char)src[i + 1];
+            unsigned char c3 = (unsigned char)src[i + 2];
+            unsigned char c4 = (unsigned char)src[i + 3];
+            if (((c2 & 0xC0) == 0x80) &&
+                ((c3 & 0xC0) == 0x80) &&
+                ((c4 & 0xC0) == 0x80))
+            {
+                *d++ = c;
+                *d++ = c2;
+                *d++ = c3;
+                *d++ = c4;
+                i += 4;
+            } else {
+                i++;
+            }
+        }
+        else {
+            // Not a valid UTF-8 start byte -> skip it.
+            i++;
+        }
+    }
+
+    return d;  // Return the pointer to the *end* of what we wrote
+}
+
+/**
+ * Appends the contents of 'src' (length 'len') to the aml_buffer 'bh',
+ * skipping bytes that do not form valid UTF-8.
+ */
+static void ajson_buffer_append_valid_utf8(aml_buffer_t *bh,
+                                           const char *src,
+                                           size_t len)
+{
+    size_t i = 0;
+    while (i < len) {
+        unsigned char c = (unsigned char)src[i];
+
+        // ASCII bytes [0..0x7F] are always valid.
+        if (c < 0x80) {
+            aml_buffer_appendc(bh, c);
+            i++;
+        }
+        // 2-byte sequence?  110xxxxx 10xxxxxx
+        else if ((c & 0xE0) == 0xC0 && (i + 1) < len) {
+            unsigned char c2 = (unsigned char)src[i+1];
+            if ((c2 & 0xC0) == 0x80) {
+                aml_buffer_appendc(bh, c);
+                aml_buffer_appendc(bh, c2);
+                i += 2;
+            } else {
+                // Invalid second byte; skip the first one.
+                i++;
+            }
+        }
+        // 3-byte sequence?  1110xxxx 10xxxxxx 10xxxxxx
+        else if ((c & 0xF0) == 0xE0 && (i + 2) < len) {
+            unsigned char c2 = (unsigned char)src[i+1];
+            unsigned char c3 = (unsigned char)src[i+2];
+            if (((c2 & 0xC0) == 0x80) && ((c3 & 0xC0) == 0x80)) {
+                aml_buffer_appendc(bh, c);
+                aml_buffer_appendc(bh, c2);
+                aml_buffer_appendc(bh, c3);
+                i += 3;
+            } else {
+                // Something invalid in the continuation bytes
+                i++;
+            }
+        }
+        // 4-byte sequence?  11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+        else if ((c & 0xF8) == 0xF0 && (i + 3) < len) {
+            unsigned char c2 = (unsigned char)src[i+1];
+            unsigned char c3 = (unsigned char)src[i+2];
+            unsigned char c4 = (unsigned char)src[i+3];
+            if (((c2 & 0xC0) == 0x80) &&
+                ((c3 & 0xC0) == 0x80) &&
+                ((c4 & 0xC0) == 0x80)) {
+                aml_buffer_appendc(bh, c);
+                aml_buffer_appendc(bh, c2);
+                aml_buffer_appendc(bh, c3);
+                aml_buffer_appendc(bh, c4);
+                i += 4;
+            } else {
+                i++;
+            }
+        }
+        else {
+            // If none of the above matched, it's invalid. Skip it.
+            i++;
+        }
+    }
+}
+
+/**
+ * ajson_strip_invalid_utf8_inplace
+ *
+ * Modifies the given buffer 'str' of length 'len' so that
+ * it contains only valid UTF-8 bytes. Invalid bytes are dropped.
+ * Returns the new length (number of valid bytes).
+ *
+ * The buffer *is* mutated in-place, and a final '\0' is *not* appended
+ * automatically (unless you want to do so yourself).
+ */
+size_t ajson_strip_invalid_utf8_inplace(char *str, size_t len)
+{
+    size_t in_i = 0;    // read index
+    size_t out_i = 0;   // write index
+
+    while (in_i < len) {
+        unsigned char c = (unsigned char)str[in_i];
+
+        // 1) ASCII range [0..0x7F]
+        if (c < 0x80) {
+            str[out_i++] = c;
+            in_i++;
+        }
+        // 2) 2-byte sequence?
+        else if ((c & 0xE0) == 0xC0 && (in_i + 1) < len) {
+            unsigned char c2 = (unsigned char)str[in_i + 1];
+            if ((c2 & 0xC0) == 0x80) {
+                // valid 2-byte
+                str[out_i++] = c;
+                str[out_i++] = c2;
+                in_i += 2;
+            } else {
+                // invalid -> skip first byte
+                in_i++;
+            }
+        }
+        // 3) 3-byte sequence?
+        else if ((c & 0xF0) == 0xE0 && (in_i + 2) < len) {
+            unsigned char c2 = (unsigned char)str[in_i + 1];
+            unsigned char c3 = (unsigned char)str[in_i + 2];
+            if (((c2 & 0xC0) == 0x80) && ((c3 & 0xC0) == 0x80)) {
+                str[out_i++] = c;
+                str[out_i++] = c2;
+                str[out_i++] = c3;
+                in_i += 3;
+            } else {
+                in_i++;
+            }
+        }
+        // 4) 4-byte sequence?
+        else if ((c & 0xF8) == 0xF0 && (in_i + 3) < len) {
+            unsigned char c2 = (unsigned char)str[in_i + 1];
+            unsigned char c3 = (unsigned char)str[in_i + 2];
+            unsigned char c4 = (unsigned char)str[in_i + 3];
+            if (((c2 & 0xC0) == 0x80) &&
+                ((c3 & 0xC0) == 0x80) &&
+                ((c4 & 0xC0) == 0x80)) {
+                str[out_i++] = c;
+                str[out_i++] = c2;
+                str[out_i++] = c3;
+                str[out_i++] = c4;
+                in_i += 4;
+            } else {
+                in_i++;
+            }
+        }
+        else {
+            // invalid start byte
+            in_i++;
+        }
+    }
+
+    // If you *want* to ensure NUL-termination, do so here (optional):
+    // str[out_i] = '\0';
+
+    return out_i;
+}
+
+
+static void ajson_dump_object_to_buffer(aml_buffer_t *bh, _ajsono_t *o);
 static void ajson_dump_array_to_buffer(aml_buffer_t *bh, _ajsona_t *a);
 
 void ajson_dump_to_buffer(aml_buffer_t *bh, ajson_t *a) {
-  if (a->type >= AJSON_STRING) {
-    if (a->type == AJSON_STRING) {
+  switch (a->type) {
+    case AJSON_OBJECT:
+      ajson_dump_object_to_buffer(bh, (_ajsono_t *)a);
+      return;
+    case AJSON_ARRAY:
+      ajson_dump_array_to_buffer(bh, (_ajsona_t *)a);
+      return;
+    case AJSON_STRING:
       aml_buffer_appendc(bh, '\"');
-      aml_buffer_append(bh, a->value, a->length);
+      ajson_buffer_append_valid_utf8(bh, a->value, a->length);
       aml_buffer_appendc(bh, '\"');
-    } else
+      return;
+    case AJSON_NULL:
+    case AJSON_TRUE:
+    case AJSON_FALSE:
+    case AJSON_ZERO:
+    case AJSON_NUMBER:
+    case AJSON_DECIMAL:
       aml_buffer_append(bh, a->value, a->length);
-  } else if (a->type == AJSON_OBJECT) {
-    ajson_dump_object_to_buffer(bh, (_ajsono_t *)a);
-  } else if (a->type == AJSON_ARRAY) {
-    ajson_dump_array_to_buffer(bh, (_ajsona_t *)a);
-  } else if (a->type == AJSON_BINARY) {
-    aml_buffer_append(bh, "nb", 2);
-    uint32_t len = a->length;
-    aml_buffer_append(bh, &len, sizeof(len));
-    aml_buffer_append(bh, a->value, a->length);
+      return;
+    default:
+      return; /* error node etc: write nothing */
   }
 }
 
-static void ajson_dump_object_to_buffer(aml_buffer_t *bh, _ajsono_t *a) {
+static void ajson_dump_object_to_buffer(aml_buffer_t *bh, _ajsono_t *o) {
   aml_buffer_appendc(bh, '{');
-  ajsono_t *n = a->head;
-  while (n) {
+  for (ajsono_t *n = o->head; n; ) {
     ajsono_t *next = n->next;
-    while (next && next->value == NULL)
-      next = next->next;
+    while (next && next->value == NULL) next = next->next;
+
     aml_buffer_appendc(bh, '\"');
     aml_buffer_appends(bh, n->key);
     aml_buffer_append(bh, "\":", 2);
+
     ajson_dump_to_buffer(bh, n->value);
-    if (next)
-      aml_buffer_appendc(bh, ',');
+    if (next) aml_buffer_appendc(bh, ',');
     n = next;
   }
-
   aml_buffer_appendc(bh, '}');
 }
 
 static void ajson_dump_array_to_buffer(aml_buffer_t *bh, _ajsona_t *a) {
   aml_buffer_appendc(bh, '[');
-  ajsona_t *n = a->head;
-  while (n) {
+  for (ajsona_t *n = a->head; n; ) {
     ajsona_t *next = n->next;
-    while (next && next->value == NULL)
-      next = next->next;
+    while (next && next->value == NULL) next = next->next;
+
     ajson_dump_to_buffer(bh, n->value);
-    if (next)
-      aml_buffer_appendc(bh, ',');
+    if (next) aml_buffer_appendc(bh, ',');
     n = next;
   }
   aml_buffer_appendc(bh, ']');
 }
 
-static void ajson_dump_object(FILE *out, _ajsono_t *a);
+
+/* ---------- size estimate (non-pretty) ---------- */
+
+static size_t ajson_dump_object_estimate(_ajsono_t *o);
+static size_t ajson_dump_array_estimate(_ajsona_t *a);
+
+static size_t _ajson_dump_estimate(ajson_t *a) {
+  switch (a->type) {
+    case AJSON_OBJECT:  return ajson_dump_object_estimate((_ajsono_t *)a);
+    case AJSON_ARRAY:   return ajson_dump_array_estimate((_ajsona_t *)a);
+    case AJSON_STRING:  return 2 + a->length; /* quotes + bytes */
+    case AJSON_NULL:
+    case AJSON_TRUE:
+    case AJSON_FALSE:
+    case AJSON_ZERO:
+    case AJSON_NUMBER:
+    case AJSON_DECIMAL:
+      return a->length;
+    default:
+      return 0;
+  }
+}
+
+static size_t ajson_dump_object_estimate(_ajsono_t *o) {
+  size_t sz = 1; /* '{' */
+  for (ajsono_t *n = o->head; n; ) {
+    ajsono_t *next = n->next;
+    while (next && next->value == NULL) next = next->next;
+
+    sz += 1 /* " */ + strlen(n->key) + 1 /* " */ + 1 /* : */;
+    sz += _ajson_dump_estimate(n->value);
+    if (next) sz += 1; /* comma */
+    n = next;
+  }
+  return sz + 1; /* '}' */
+}
+
+static size_t ajson_dump_array_estimate(_ajsona_t *a) {
+  size_t sz = 1; /* '[' */
+  for (ajsona_t *n = a->head; n; ) {
+    ajsona_t *next = n->next;
+    while (next && next->value == NULL) next = next->next;
+
+    sz += _ajson_dump_estimate(n->value);
+    if (next) sz += 1; /* comma */
+    n = next;
+  }
+  return sz + 1; /* ']' */
+}
+
+size_t ajson_dump_estimate(ajson_t *a) {
+  return _ajson_dump_estimate(a) + 1; /* include trailing NUL for _to_memory */
+}
+
+
+/* ---------- dump to contiguous memory (non-pretty) ---------- */
+
+static char *_ajson_dump_to_memory(char *s, ajson_t *a);
+static char *ajson_dump_object_to_memory(char *s, _ajsono_t *o);
+static char *ajson_dump_array_to_memory(char *s, _ajsona_t *a);
+
+static char *_ajson_dump_to_memory(char *s, ajson_t *a) {
+  switch (a->type) {
+    case AJSON_OBJECT:  return ajson_dump_object_to_memory(s, (_ajsono_t *)a);
+    case AJSON_ARRAY:   return ajson_dump_array_to_memory(s, (_ajsona_t *)a);
+    case AJSON_STRING:
+      *s++ = '"';
+      s = ajson_copy_valid_utf8(s, a->value, a->length);
+      *s++ = '"';
+      return s;
+    case AJSON_NULL:
+    case AJSON_TRUE:
+    case AJSON_FALSE:
+    case AJSON_ZERO:
+    case AJSON_NUMBER:
+    case AJSON_DECIMAL:
+      memcpy(s, a->value, a->length); return s + a->length;
+    default:
+      return s;
+  }
+}
+
+static char *ajson_dump_object_to_memory(char *s, _ajsono_t *o) {
+  *s++ = '{';
+  for (ajsono_t *n = o->head; n; ) {
+    ajsono_t *next = n->next;
+    while (next && next->value == NULL) next = next->next;
+
+    *s++ = '"';
+    size_t kl = strlen(n->key);
+    memcpy(s, n->key, kl); s += kl;
+    *s++ = '"';
+    *s++ = ':';
+
+    s = _ajson_dump_to_memory(s, n->value);
+    if (next) *s++ = ',';
+    n = next;
+  }
+  *s++ = '}';
+  return s;
+}
+
+static char *ajson_dump_array_to_memory(char *s, _ajsona_t *a) {
+  *s++ = '[';
+  for (ajsona_t *n = a->head; n; ) {
+    ajsona_t *next = n->next;
+    while (next && next->value == NULL) next = next->next;
+
+    s = _ajson_dump_to_memory(s, n->value);
+    if (next) *s++ = ',';
+    n = next;
+  }
+  *s++ = ']';
+  return s;
+}
+
+char *ajson_dump_to_memory(char *s, ajson_t *a) {
+  s = _ajson_dump_to_memory(s, a);
+  *s = 0;
+  return s;
+}
+
+
+/* ---------- FILE* dump (non-pretty) ---------- */
+
+static void ajson_dump_object(FILE *out, _ajsono_t *o);
 static void ajson_dump_array(FILE *out, _ajsona_t *a);
 
 void ajson_dump(FILE *out, ajson_t *a) {
-  if (a->type >= AJSON_STRING) {
-    if (a->type == AJSON_STRING)
-      fprintf(out, "\"%s\"", a->value);
-    else
-      fprintf(out, "%s", a->value);
-  } else if (a->type == AJSON_OBJECT) {
-    ajson_dump_object(out, (_ajsono_t *)a);
-  } else if (a->type == AJSON_ARRAY) {
-    ajson_dump_array(out, (_ajsona_t *)a);
-  } else if (a->type == AJSON_BINARY) {
-    fprintf(out, "b");
-    uint32_t len = a->length;
-    fwrite(&len, sizeof(len), 1, out);
-    fwrite(a->value, a->length, 1, out);
+  switch (a->type) {
+    case AJSON_OBJECT:  ajson_dump_object(out, (_ajsono_t *)a); return;
+    case AJSON_ARRAY:   ajson_dump_array(out,  (_ajsona_t *)a); return;
+    case AJSON_STRING:
+      fputc('\"', out);
+      ajson_file_write_valid_utf8(out, a->value, a->length);
+      fputc('\"', out);
+      return;
+    case AJSON_NULL:
+    case AJSON_TRUE:
+    case AJSON_FALSE:
+    case AJSON_ZERO:
+    case AJSON_NUMBER:
+    case AJSON_DECIMAL:
+      fwrite(a->value, 1, a->length, out);
+      return;
+    default:
+      return;
   }
 }
 
-static void ajson_dump_object(FILE *out, _ajsono_t *a) {
-  fprintf(out, "{");
-  ajsono_t *n = a->head;
-  while (n) {
+static void ajson_dump_object(FILE *out, _ajsono_t *o) {
+  fputc('{', out);
+  for (ajsono_t *n = o->head; n; ) {
     ajsono_t *next = n->next;
-    while (next && next->value == NULL)
-      next = next->next;
+    while (next && next->value == NULL) next = next->next;
 
-    fprintf(out, "\"%s\":", n->key);
+    fputc('\"', out);
+    size_t kl = strlen(n->key);
+    fwrite(n->key, 1, kl, out);
+    fputc('\"', out);
+    fputc(':', out);
+
     ajson_dump(out, n->value);
-    if (next)
-      fprintf(out, ",");
+    if (next) fputc(',', out);
     n = next;
   }
-
-  fprintf(out, "}");
+  fputc('}', out);
 }
 
 static void ajson_dump_array(FILE *out, _ajsona_t *a) {
-  fprintf(out, "[");
-  ajsona_t *n = a->head;
-  while (n) {
+  fputc('[', out);
+  for (ajsona_t *n = a->head; n; ) {
     ajsona_t *next = n->next;
-    while (next && next->value == NULL)
-      next = next->next;
+    while (next && next->value == NULL) next = next->next;
 
     ajson_dump(out, n->value);
-    if (next)
-      fprintf(out, ",");
+    if (next) fputc(',', out);
     n = next;
   }
-  fprintf(out, "]");
+  fputc(']', out);
+}
+
+
+/* ---------- pretty: estimate, write-to-memory, write-to-buffer, write-to-file ---------- */
+
+static inline int _pp_step(int step) { return (step > 0 ? step : 2); }
+
+static size_t _ajson_dump_pretty_estimate(ajson_t *a, int depth, int step);
+static size_t _ajson_dump_pretty_estimate_object(_ajsono_t *o, int depth, int step) {
+  size_t sz = 2; /* braces */
+  int s = _pp_step(step);
+  int had_any = 0;
+
+  for (ajsono_t *n = o->head; n; ) {
+    ajsono_t *next = n->next;
+    while (next && next->value == NULL) next = next->next;
+    if (!n->value) { n = next; continue; }
+
+    sz += 1;                 /* '\n' */
+    sz += (size_t)((depth+1)*s);
+    sz += 1 + strlen(n->key) + 1; /* "key" */
+    sz += 2;                 /* ": " */
+    sz += _ajson_dump_pretty_estimate(n->value, depth+1, step);
+    if (next) sz += 1;       /* comma */
+    had_any = 1;
+    n = next;
+  }
+  if (had_any) {
+    sz += 1;                 /* trailing '\n' */
+    sz += (size_t)(depth*s); /* closing indent */
+  }
+  return sz;
+}
+
+static size_t _ajson_dump_pretty_estimate_array(_ajsona_t *a, int depth, int step) {
+  size_t sz = 2; /* brackets */
+  int s = _pp_step(step);
+  int had_any = 0;
+
+  for (ajsona_t *n = a->head; n; ) {
+    ajsona_t *next = n->next;
+    while (next && next->value == NULL) next = next->next;
+    if (!n->value) { n = next; continue; }
+
+    sz += 1;                 /* '\n' */
+    sz += (size_t)((depth+1)*s);
+    sz += _ajson_dump_pretty_estimate(n->value, depth+1, step);
+    if (next) sz += 1;       /* comma */
+    had_any = 1;
+    n = next;
+  }
+  if (had_any) {
+    sz += 1;                 /* trailing '\n' */
+    sz += (size_t)(depth*s); /* closing indent */
+  }
+  return sz;
+}
+
+static size_t _ajson_dump_pretty_estimate(ajson_t *a, int depth, int step) {
+  switch (a->type) {
+    case AJSON_OBJECT:  return _ajson_dump_pretty_estimate_object((_ajsono_t *)a, depth, step);
+    case AJSON_ARRAY:   return _ajson_dump_pretty_estimate_array((_ajsona_t *)a, depth, step);
+    case AJSON_STRING:  return 2 + a->length;
+    case AJSON_NULL:
+    case AJSON_TRUE:
+    case AJSON_FALSE:
+    case AJSON_ZERO:
+    case AJSON_NUMBER:
+    case AJSON_DECIMAL:
+      return a->length;
+    default:
+      return 0;
+  }
+}
+
+size_t ajson_dump_pretty_estimate(ajson_t *a, int indent_step) {
+  return _ajson_dump_pretty_estimate(a, 0, indent_step) + 1; /* include NUL */
+}
+
+static inline char *_indent_mem(char *s, int depth, int step) {
+  int n = depth * _pp_step(step);
+  while (n--) *s++ = ' ';
+  return s;
+}
+
+static char *_ajson_dump_pretty_to_memory(char *s, ajson_t *a, int depth, int step);
+static char *_dump_object_pretty_mem(char *s, _ajsono_t *o, int depth, int step) {
+  *s++ = '{';
+  int had_any = 0;
+
+  for (ajsono_t *n = o->head; n; ) {
+    ajsono_t *next = n->next;
+    while (next && next->value == NULL) next = next->next;
+    if (!n->value) { n = next; continue; }
+
+    *s++ = '\n';
+    s = _indent_mem(s, depth+1, step);
+    *s++ = '"';
+    size_t kl = strlen(n->key);
+    memcpy(s, n->key, kl); s += kl;
+    *s++ = '"';
+    *s++ = ':'; *s++ = ' ';
+
+    s = _ajson_dump_pretty_to_memory(s, n->value, depth+1, step);
+    if (next) *s++ = ',';
+    had_any = 1;
+    n = next;
+  }
+  if (had_any) {
+    *s++ = '\n';
+    s = _indent_mem(s, depth, step);
+  }
+  *s++ = '}';
+  return s;
+}
+
+static char *_dump_array_pretty_mem(char *s, _ajsona_t *a, int depth, int step) {
+  *s++ = '[';
+  int had_any = 0;
+
+  for (ajsona_t *n = a->head; n; ) {
+    ajsona_t *next = n->next;
+    while (next && next->value == NULL) next = next->next;
+    if (!n->value) { n = next; continue; }
+
+    *s++ = '\n';
+    s = _indent_mem(s, depth+1, step);
+    s = _ajson_dump_pretty_to_memory(s, n->value, depth+1, step);
+    if (next) *s++ = ',';
+    had_any = 1;
+    n = next;
+  }
+  if (had_any) {
+    *s++ = '\n';
+    s = _indent_mem(s, depth, step);
+  }
+  *s++ = ']';
+  return s;
+}
+
+static char *_ajson_dump_pretty_to_memory(char *s, ajson_t *a, int depth, int step) {
+  switch (a->type) {
+    case AJSON_OBJECT:  return _dump_object_pretty_mem(s, (_ajsono_t *)a, depth, step);
+    case AJSON_ARRAY:   return _dump_array_pretty_mem(s, (_ajsona_t *)a, depth, step);
+    case AJSON_STRING:
+      *s++ = '"';
+      s = ajson_copy_valid_utf8(s, a->value, a->length);
+      *s++ = '"';
+      return s;
+    case AJSON_NULL:
+    case AJSON_TRUE:
+    case AJSON_FALSE:
+    case AJSON_ZERO:
+    case AJSON_NUMBER:
+    case AJSON_DECIMAL:
+      memcpy(s, a->value, a->length); return s + a->length;
+    default:
+      return s;
+  }
+}
+
+char *ajson_stringify(aml_pool_t *pool, ajson_t *a)
+{
+    /* ajson_dump_estimate() already includes the trailing NUL */
+    size_t need = ajson_dump_estimate(a);
+    char *s = (char *)aml_pool_alloc(pool, need);
+    (void)ajson_dump_to_memory(s, a); /* writes the JSON and the final '\0' */
+    return s;
+}
+
+/* Kept for compatibility; just forward to the new API. */
+char *ajson_dump_using_pool(aml_pool_t *pool, ajson_t *a)
+{
+    return ajson_stringify(pool, a);
+}
+
+char *ajson_stringify_pretty(aml_pool_t *pool, ajson_t *a, int indent_step) {
+  size_t size = ajson_dump_pretty_estimate(a, indent_step);
+  char *s = (char *)aml_pool_alloc(pool, size);
+  char *end = _ajson_dump_pretty_to_memory(s, a, 0, indent_step);
+  *end = 0;
+  return s;
+}
+
+void ajson_dump_pretty_to_buffer(aml_buffer_t *bh, ajson_t *a, int indent_step) {
+  size_t need_with_nul = ajson_dump_pretty_estimate(a, indent_step);
+  size_t need = need_with_nul - 1;
+
+  size_t old_len = aml_buffer_length(bh);
+  aml_buffer_resize(bh, old_len + need);
+  char *base = aml_buffer_data(bh) + old_len;
+
+  char *end = _ajson_dump_pretty_to_memory(base, a, 0, indent_step);
+  size_t wrote = (size_t)(end - base);
+  if (wrote < need) aml_buffer_shrink_by(bh, need - wrote);
+}
+
+static void _indent_file(FILE *out, int depth, int step) {
+  int n = depth * _pp_step(step);
+  while (n--) fputc(' ', out);
+}
+
+static void _dump_pretty_file(FILE *out, ajson_t *a, int depth, int step);
+static void _dump_object_pretty_file(FILE *out, _ajsono_t *o, int depth, int step) {
+  fputc('{', out);
+  int first = 1;
+
+  for (ajsono_t *n = o->head; n; ) {
+    ajsono_t *next = n->next;
+    while (next && next->value == NULL) next = next->next;
+    if (!n->value) { n = next; continue; }
+
+    fputc('\n', out);
+    _indent_file(out, depth + 1, step);
+    fputc('\"', out);
+    size_t kl = strlen(n->key);
+    fwrite(n->key, 1, kl, out);
+    fputc('\"', out);
+    fputs(": ", out);
+
+    _dump_pretty_file(out, n->value, depth + 1, step);
+    if (next) fputc(',', out);
+    first = 0;
+    n = next;
+  }
+  if (!first) { fputc('\n', out); _indent_file(out, depth, step); }
+  fputc('}', out);
+}
+
+static void _dump_array_pretty_file(FILE *out, _ajsona_t *a, int depth, int step) {
+  fputc('[', out);
+  int first = 1;
+
+  for (ajsona_t *n = a->head; n; ) {
+    ajsona_t *next = n->next;
+    while (next && next->value == NULL) next = next->next;
+    if (!n->value) { n = next; continue; }
+
+    fputc('\n', out);
+    _indent_file(out, depth + 1, step);
+    _dump_pretty_file(out, n->value, depth + 1, step);
+    if (next) fputc(',', out);
+    first = 0;
+    n = next;
+  }
+  if (!first) { fputc('\n', out); _indent_file(out, depth, step); }
+  fputc(']', out);
+}
+
+static void _dump_pretty_file(FILE *out, ajson_t *a, int depth, int step) {
+  switch (a->type) {
+    case AJSON_OBJECT:  _dump_object_pretty_file(out, (_ajsono_t *)a, depth, step); return;
+    case AJSON_ARRAY:   _dump_array_pretty_file(out,  (_ajsona_t *)a, depth, step); return;
+    case AJSON_STRING:
+      fputc('\"', out);
+      ajson_file_write_valid_utf8(out, a->value, a->length);
+      fputc('\"', out);
+      return;
+    case AJSON_NULL:
+    case AJSON_TRUE:
+    case AJSON_FALSE:
+    case AJSON_ZERO:
+    case AJSON_NUMBER:
+    case AJSON_DECIMAL:
+      fwrite(a->value, 1, a->length, out);
+      return;
+    default:
+      return;
+  }
+}
+
+void ajson_dump_pretty(FILE *out, ajson_t *a, int indent_step) {
+  _dump_pretty_file(out, a, 0, indent_step);
 }
 
 static int unicode_to_utf8(char *dest, char **src) {
@@ -393,55 +1049,30 @@ static inline char *_ajson_decode(aml_pool_t *pool, char **eptr, char *s, char *
 }
 
 char *_ajson_encode(aml_pool_t *pool, char *s, char *p, size_t length) {
-  char *res = (char *)aml_pool_alloc(pool, (length * 2) + 3);
+  char *res = (char *)aml_pool_alloc(pool, (length * 6) + 3);  // More space for unicode escapes
   char *wp = res;
   memcpy(res, s, p - s);
   wp += (p - s);
   char *ep = s + length;
   while (p < ep) {
     switch (*p) {
-    case '\"':
-      *wp++ = '\\';
-      *wp++ = '\"';
-      p++;
-      break;
-    case '\\':
-      *wp++ = '\\';
-      *wp++ = '\\';
-      p++;
-      break;
-    case '/':
-      *wp++ = '\\';
-      *wp++ = '/';
-      p++;
-      break;
-    case '\b':
-      *wp++ = '\\';
-      *wp++ = 'b';
-      p++;
-      break;
-    case '\f':
-      *wp++ = '\\';
-      *wp++ = 'f';
-      p++;
-      break;
-    case '\n':
-      *wp++ = '\\';
-      *wp++ = 'n';
-      p++;
-      break;
-    case '\r':
-      *wp++ = '\\';
-      *wp++ = 'r';
-      p++;
-      break;
-    case '\t':
-      *wp++ = '\\';
-      *wp++ = 't';
-      p++;
-      break;
+    case '\"': *wp++ = '\\'; *wp++ = '\"'; p++; break;
+    case '\\': *wp++ = '\\'; *wp++ = '\\'; p++; break;
+    case '/':  *wp++ = '\\'; *wp++ = '/';  p++; break;
+    case '\b': *wp++ = '\\'; *wp++ = 'b';  p++; break;
+    case '\f': *wp++ = '\\'; *wp++ = 'f';  p++; break;
+    case '\n': *wp++ = '\\'; *wp++ = 'n';  p++; break;
+    case '\r': *wp++ = '\\'; *wp++ = 'r';  p++; break;
+    case '\t': *wp++ = '\\'; *wp++ = 't';  p++; break;
+
     default:
-      *wp++ = *p++;
+      if ((unsigned char)(*p) < 0x20) {
+        sprintf(wp, "\\u%04X", (unsigned char)(*p));
+        wp += 6;
+        p++;
+      } else {
+        *wp++ = *p++;
+      }
       break;
     }
   }
@@ -451,28 +1082,12 @@ char *_ajson_encode(aml_pool_t *pool, char *s, char *p, size_t length) {
 
 char *ajson_encode(aml_pool_t *pool, char *s, size_t length) {
   char *p = s;
-  char *ep = p + length;
-  if(*ep != 0) {
-    s = aml_pool_dup(pool, s, length+1);
-    s[length] = 0;
-    p = s;
-    ep = p + length;
-  }
+  char *ep = s + length;
   while (p < ep) {
-    switch (*p) {
-    case '\0':
-    case '\"':
-    case '\\':
-    case '/':
-    case '\b':
-    case '\f':
-    case '\n':
-    case '\r':
-    case '\t':
-      return _ajson_encode(pool, s, p, length);
-    default:
-      p++;
-    }
+    unsigned char ch = (unsigned char)*p;
+    if (ch < 0x20 || ch == '\"' || ch == '\\' || ch == '/' || ch == 0)
+       return _ajson_encode(pool, s, p, length);
+    p++;
   }
   return s;
 }
@@ -585,6 +1200,8 @@ ajson_t *ajson_parse(aml_pool_t *pool, char *p, char *ep) {
   int data_type;
   uint32_t string_length;
 
+  bool after_comma = false;
+
   if (p >= ep) {
     p++;
     AJSON_BAD_CHARACTER;
@@ -605,12 +1222,16 @@ start_key:;
   ch = *p++;
   switch (ch) {
   case '\"':
+    after_comma = false;
     key = p;
     goto get_end_of_key;
   case AJSON_SPACE_CASE:
     AJSON_START_KEY;
   case '}':
-    // if (mode == AJSON_RDONLY)
+    /* Trailing comma like “…, }” is invalid. */
+    if (after_comma) {
+      AJSON_BAD_CHARACTER;
+    }
 #ifdef AJSON_FILL_TEST
 #ifdef AJSON_SORT_TEST
     _ajsono_fill(root);
@@ -684,49 +1305,39 @@ start_key_object:;
     root = (_ajsono_t *)arr;
     AJSON_START_VALUE;
   case '-':
-    stringp = p - 1;
+    stringp = p - 1;           /* keep '-' in the slice */
     ch = *p++;
-    if (ch >= '1' && ch <= '9') {
-      AJSON_KEYED_NEXT_DIGIT;
-    } else if (ch == '0') {
+    if (ch == '0') {
+      char la = *p;            /* lookahead after the zero */
+      if (la == '.') { p++; AJSON_KEYED_DECIMAL_NUMBER; }
+      if (la == 'e' || la == 'E') { AJSON_KEYED_NEXT_DIGIT; }  /* exponent handled in NEXT_DIGIT path */
+      if (la >= '0' && la <= '9') { AJSON_BAD_CHARACTER; }     /* -0<digit> is invalid */
+      /* simple "-0" */
+      data_type = AJSON_NUMBER;
+      string_length = p - stringp;  /* "-0" */
       ch = *p;
-      if (p + 1 < ep) {
-        if (ch != '.') {
-          stringp = (char *)"0";
-          data_type = AJSON_ZERO;
-          string_length = 1;
-          AJSON_KEYED_ADD_STRING;
-        } else {
-          p++;
-          AJSON_KEYED_DECIMAL_NUMBER;
-        }
-      } else {
-        stringp = (char *)"0";
-        data_type = AJSON_ZERO;
-        string_length = 1;
-        AJSON_KEYED_ADD_STRING;
-      }
-    }
-    AJSON_BAD_CHARACTER;
-  case '0':
-    stringp = p - 1;
-    ch = *p;
-    if (p + 1 < ep) {
-      if (ch != '.') {
-        stringp = (char *)"0";
-        data_type = AJSON_ZERO;
-        string_length = 1;
-        AJSON_KEYED_ADD_STRING;
-      } else {
-        p++;
-        AJSON_KEYED_DECIMAL_NUMBER;
-      }
-    } else {
-      stringp = (char *)"0";
-      data_type = AJSON_ZERO;
-      string_length = 1;
+      *p = 0;
       AJSON_KEYED_ADD_STRING;
+    } else if (ch >= '1' && ch <= '9') {
+      AJSON_KEYED_NEXT_DIGIT;
+    } else {
+      AJSON_BAD_CHARACTER;
     }
+  case '0': {
+    stringp = p - 1;                 /* start at the '0' */
+    if (p < ep) {
+      char la = *p;                  /* lookahead */
+      if (la == '.') { p++; AJSON_KEYED_DECIMAL_NUMBER; }
+      if (la == 'e' || la == 'E') { AJSON_KEYED_NEXT_DIGIT; }
+      if (la >= '0' && la <= '9') { AJSON_BAD_CHARACTER; }  /* leading zeros */
+    }
+    /* simple "0" */
+    stringp       = (char *)"0";
+    data_type     = AJSON_ZERO;
+    string_length = 1;
+    ch = *p;                          /* <<< IMPORTANT: next delimiter */
+    AJSON_KEYED_ADD_STRING;
+  }
   case AJSON_NATURAL_NUMBER_CASE:
     stringp = p - 1;
     AJSON_KEYED_NEXT_DIGIT;
@@ -778,24 +1389,7 @@ start_key_object:;
     AJSON_KEYED_ADD_STRING;
   case 'n':
     ch = *p++;
-    if (ch != 'u') {
-      if (ch == 'b') {
-        if (p + 3 >= ep) {
-          AJSON_BAD_CHARACTER;
-        }
-        string_length = *(uint32_t *)(p);
-        p += 4;
-        if (p + string_length >= ep) {
-          AJSON_BAD_CHARACTER;
-        }
-        data_type = AJSON_BINARY;
-        stringp = p;
-        p += string_length;
-        ch = *p;
-        AJSON_KEYED_ADD_STRING;
-      }
-      AJSON_BAD_CHARACTER;
-    }
+    if (ch != 'u') { AJSON_BAD_CHARACTER; }
     ch = *p++;
     if (ch != 'l') {
       AJSON_BAD_CHARACTER;
@@ -856,9 +1450,9 @@ look_for_key:;
       AJSON_BAD_CHARACTER;
     }
     p++;
+    after_comma = true;
     AJSON_START_KEY;
   case '}':
-// if (mode == AJSON_RDONLY)
 #ifdef AJSON_FILL_TEST
 #ifdef AJSON_SORT_TEST
     _ajsono_fill(root);
@@ -866,6 +1460,10 @@ look_for_key:;
     _ajsono_fill_tree(root);
 #endif
 #endif
+    /* If we just had a comma before this '}', it’s a trailing comma → error. */
+    if (after_comma) {
+      AJSON_BAD_CHARACTER;
+    }
     root = (_ajsono_t *)root->parent;
     if (!root)
       return res;
@@ -972,12 +1570,14 @@ start_value:;
   ch = *p++;
   switch (ch) {
   case '\"':
+    after_comma = false;
     stringp = p;
     data_type = AJSON_STRING;
     AJSON_START_STRING;
   case AJSON_SPACE_CASE:
     AJSON_START_VALUE;
   case '{':
+    after_comma = false;
     anode = (ajsona_t *)aml_pool_zalloc(pool, sizeof(ajsona_t) +
                                                    sizeof(_ajsono_t));
     obj = (_ajsono_t *)(anode + 1);
@@ -1000,6 +1600,7 @@ start_value:;
     root = obj;
     AJSON_START_KEY;
   case '[':
+    after_comma = false;
     anode = (ajsona_t *)aml_pool_zalloc(pool, sizeof(ajsona_t) +
                                                    sizeof(_ajsona_t));
     arr2 = (_ajsona_t *)(anode + 1);
@@ -1022,10 +1623,13 @@ start_value:;
     root = (_ajsono_t *)arr;
     AJSON_START_VALUE;
   case ']':
-// if (mode == AJSON_RDONLY)
 #ifdef AJSON_FILL_TEST
     _ajsona_fill(arr);
 #endif
+    /* If we just had a comma before this ']', it’s a trailing comma → error. */
+    if (after_comma) {
+      AJSON_BAD_CHARACTER;
+    }
     root = (_ajsono_t *)arr->parent;
     if (!root)
       return res;
@@ -1037,53 +1641,46 @@ start_value:;
       goto look_for_next_object;
     }
   case '-':
-    stringp = p - 1;
+    after_comma = false;
+    stringp = p - 1;           /* include '-' */
     ch = *p++;
-    if (ch >= '1' && ch <= '9') {
-      AJSON_NEXT_DIGIT;
-    } else if (ch == '0') {
+    if (ch == '0') {
+      char la = *p;
+      if (la == '.') { p++; AJSON_DECIMAL_NUMBER; }
+      if (la == 'e' || la == 'E') { AJSON_NEXT_DIGIT; }
+      if (la >= '0' && la <= '9') { AJSON_BAD_CHARACTER; }
+      data_type = AJSON_NUMBER;
+      string_length = p - stringp;   /* "-0" */
       ch = *p;
-      if (p + 1 < ep) {
-        if (ch != '.') {
-          stringp = (char *)"0";
-          data_type = AJSON_ZERO;
-          string_length = 1;
-          AJSON_ADD_STRING;
-        } else {
-          p++;
-          AJSON_DECIMAL_NUMBER;
-        }
-      } else {
-        stringp = (char *)"0";
-        data_type = AJSON_ZERO;
-        string_length = 1;
-        AJSON_ADD_STRING;
-      }
-    }
-    AJSON_BAD_CHARACTER;
-  case '0':
-    stringp = p - 1;
-    ch = *p;
-    if (p + 1 < ep) {
-      if (ch != '.') {
-        stringp = (char *)"0";
-        data_type = AJSON_ZERO;
-        string_length = 1;
-        AJSON_ADD_STRING;
-      } else {
-        p++;
-        AJSON_DECIMAL_NUMBER;
-      }
-    } else {
-      stringp = (char *)"0";
-      data_type = AJSON_ZERO;
-      string_length = 1;
+      *p = 0;
       AJSON_ADD_STRING;
+    } else if (ch >= '1' && ch <= '9') {
+      AJSON_NEXT_DIGIT;
+    } else {
+      AJSON_BAD_CHARACTER;
     }
+  case '0': {
+    after_comma = false;
+    stringp = p - 1;
+    if (p < ep) {
+      char la = *p;
+      if (la == '.') { p++; AJSON_DECIMAL_NUMBER; }
+      if (la == 'e' || la == 'E') { AJSON_NEXT_DIGIT; }
+      if (la >= '0' && la <= '9') { AJSON_BAD_CHARACTER; }
+    }
+    /* simple "0" */
+    stringp       = (char *)"0";
+    data_type     = AJSON_ZERO;
+    string_length = 1;
+    ch = *p;                          /* <<< IMPORTANT: next delimiter */
+    AJSON_ADD_STRING;
+  }
   case AJSON_NATURAL_NUMBER_CASE:
+    after_comma = false;
     stringp = p - 1;
     AJSON_NEXT_DIGIT;
   case 't':
+    after_comma = false;
     ch = *p++;
     if (ch != 'r') {
       AJSON_BAD_CHARACTER;
@@ -1102,6 +1699,7 @@ start_value:;
     ch = *p;
     AJSON_ADD_STRING;
   case 'f':
+    after_comma = false;
     ch = *p++;
     if (ch != 'a') {
       AJSON_BAD_CHARACTER;
@@ -1124,26 +1722,9 @@ start_value:;
     ch = *p;
     AJSON_ADD_STRING;
   case 'n':
+    after_comma = false;
     ch = *p++;
-    if (ch != 'u') {
-      if (ch == 'b') {
-        if (p + 3 >= ep) {
-          AJSON_BAD_CHARACTER;
-        }
-        string_length = *(uint32_t *)(p);
-        p += 4;
-        if (p + string_length >= ep) {
-          AJSON_BAD_CHARACTER;
-        }
-        data_type = AJSON_BINARY;
-        stringp = p;
-        p += string_length;
-        ch = *p;
-        AJSON_ADD_STRING;
-      }
-
-      AJSON_BAD_CHARACTER;
-    }
+    if (ch != 'u') { AJSON_BAD_CHARACTER; }
     ch = *p++;
     if (ch != 'l') {
       AJSON_BAD_CHARACTER;
@@ -1218,12 +1799,16 @@ look_for_next_object:;
       AJSON_BAD_CHARACTER;
     }
     p++;
+    after_comma = true;
     AJSON_START_VALUE;
   case ']':
-// if (mode == AJSON_RDONLY)
 #ifdef AJSON_FILL_TEST
     _ajsona_fill(arr);
 #endif
+    /* Trailing comma like “…, ]” is invalid. */
+    if (after_comma) {
+      AJSON_BAD_CHARACTER;
+    }
     root = (_ajsono_t *)arr->parent;
     if (!root)
       return res;

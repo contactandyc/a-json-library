@@ -4,15 +4,16 @@ AJSON is a very efficient JSON processing library written in C, providing robust
 
 ## Dependencies
 
-* [A memory library](https://github.com/contactandyc/a-memory-library) for the memory handling
-* [The macro library](https://github.com/contactandyc/the-macro-library) for sorting, searching, and conversions
+* [A cmake library](https://github.com/knode-ai-open-source/a-cmake-library) needed for the cmake build
+* [A memory library](https://github.com/knode-ai-open-source/a-memory-library) for the memory handling
+* [The macro library](https://github.com/knode-ai-open-source/the-macro-library) for sorting, searching, and conversions
 
 ## Installation
 
 ### Clone the library and change to the directory
 
 ```bash
-git clone https://github.com/contactandyc/a-json-library.git
+git clone https://github.com/knode-ai-open-source/a-json-library.git
 cd a-json-library
 ```
 
