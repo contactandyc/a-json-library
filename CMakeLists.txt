@@ -44,9 +44,12 @@ endif()
 
 include(GNUInstallDirs)
 
-# ---- Dependencies ----
+# ---- Dependencies (Standard CMake) ----
 find_package(a_memory_library CONFIG REQUIRED)
 find_package(the_macro_library CONFIG REQUIRED)
+find_package(a_json_sax_library CONFIG REQUIRED)
+
+# ---- Dependencies (PkgConfig Shims) ----
 
 # ── Library variants (ALL are defined & built/installed) ──────────────────────
 add_library(a_json_library_debug  src/ajson.c)
@@ -70,7 +73,7 @@ if("CXX" IN_LIST CMAKE_PROJECT_LANGUAGES)
 endif()
 
 # Link deps once
-target_link_libraries(a_json_library_debug PUBLIC  a_memory_library::a_memory_library  the_macro_library::the_macro_library)
+target_link_libraries(a_json_library_debug PUBLIC  a_memory_library::a_memory_library  the_macro_library::the_macro_library  a_json_sax_library::a_json_sax_library)
 
 # Per-variant optimization flavor
 target_compile_options(a_json_library_debug PRIVATE ${_A_DEBUG_OPTS})
@@ -104,7 +107,7 @@ if("CXX" IN_LIST CMAKE_PROJECT_LANGUAGES)
 endif()
 
 # Link deps once
-target_link_libraries(a_json_library_memory PUBLIC  a_memory_library::a_memory_library  the_macro_library::the_macro_library)
+target_link_libraries(a_json_library_memory PUBLIC  a_memory_library::a_memory_library  the_macro_library::the_macro_library  a_json_sax_library::a_json_sax_library)
 
 # Per-variant optimization flavor
 target_compile_options(a_json_library_memory PRIVATE ${_A_DEBUG_OPTS})
@@ -141,7 +144,7 @@ if("CXX" IN_LIST CMAKE_PROJECT_LANGUAGES)
 endif()
 
 # Link deps once
-target_link_libraries(a_json_library_static PUBLIC  a_memory_library::a_memory_library  the_macro_library::the_macro_library)
+target_link_libraries(a_json_library_static PUBLIC  a_memory_library::a_memory_library  the_macro_library::the_macro_library  a_json_sax_library::a_json_sax_library)
 
 # Per-variant optimization flavor
 target_compile_options(a_json_library_static PRIVATE ${_A_RELEASE_OPTS})
@@ -175,7 +178,7 @@ if("CXX" IN_LIST CMAKE_PROJECT_LANGUAGES)
 endif()
 
 # Link deps once
-target_link_libraries(a_json_library_shared PUBLIC  a_memory_library::a_memory_library  the_macro_library::the_macro_library)
+target_link_libraries(a_json_library_shared PUBLIC  a_memory_library::a_memory_library  the_macro_library::the_macro_library  a_json_sax_library::a_json_sax_library)
 
 # Per-variant optimization flavor
 target_compile_options(a_json_library_shared PRIVATE ${_A_RELEASE_OPTS})
@@ -241,7 +244,7 @@ endif()
 
 set(A_BUILD_TARGET_BASENAME "a_json_library")
 set(A_BUILD_EXPORT_NAMESPACE "a_json_library")
-set(A_BUILD_DEPS "a_memory_library;the_macro_library")
+set(A_BUILD_DEPS "a_memory_library;the_macro_library;a_json_sax_library")
 
 include(CMakePackageConfigHelpers)
 configure_package_config_file(

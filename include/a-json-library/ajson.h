@@ -14,6 +14,7 @@
 
 #include "a-memory-library/aml_buffer.h"
 #include "a-memory-library/aml_pool.h"
+#include "a-json-sax-library/ajson_string_utils.h"
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -159,24 +160,6 @@ char *ajson_stringify(aml_pool_t *pool, ajson_t *a);
 
 /** Pretty JSON as a single pool allocation. */
 char *ajson_stringify_pretty(aml_pool_t *pool, ajson_t *a, int indent_step);
-
-/* ========================
- * Encode / decode strings
- * ======================== */
-
-/** Decode JSON escape sequences in [s, s+length) into UTF-8.
- *  May return 's' unchanged if no escapes are present (aliasing!).
- *  Otherwise returns a pool-allocated buffer. */
-char *ajson_decode(aml_pool_t *pool, char *s, size_t length);
-
-/** Decode like ajson_decode, but also returns decoded length via *rlen.
- *  May alias input if nothing to decode. */
-char *ajson_decode2(size_t *rlen, aml_pool_t *pool, char *s, size_t length);
-
-/** Escape JSON specials/control bytes in [s, s+length).
- *  May return 's' unchanged if nothing needs escaping (aliasing!),
- *  otherwise returns a pool-allocated buffer. */
-char *ajson_encode(aml_pool_t *pool, char *s, size_t length);
 
 /* ==========================
  * Access raw storage safely
