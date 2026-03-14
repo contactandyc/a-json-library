@@ -19,6 +19,8 @@ find_library(M_LIB m)
 set(TEST_EXECUTABLES "")
 add_executable(test_ajson  src/test_ajson.c)
 
+target_include_directories(test_ajson PRIVATE  ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 list(APPEND TEST_EXECUTABLES test_ajson)
 
 set_target_properties(test_ajson PROPERTIES

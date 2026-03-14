@@ -27,7 +27,7 @@ sudo cmake --install .
 ### Development tooling (optional)
 
 ```bash
-sudo apt-get update && sudo apt-get install -y valgrind gdb python3 python3-venv python3-pip perl autoconf automake libtool
+sudo apt-get update && sudo apt-get install -y valgrind gdb perl autoconf automake libtool python3 python3-venv python3-pip
 ```
 
 
@@ -106,13 +106,13 @@ RUN apt-get update && apt-get install -y \
 RUN apt-get update && apt-get install -y \
     valgrind \
     gdb \
-    python3 \
-    python3-venv \
-    python3-pip \
     perl \
     autoconf \
     automake \
     libtool \
+    python3 \
+    python3-venv \
+    python3-pip \
  && rm -rf /var/lib/apt/lists/*
 
 # --- Install CMake from official binaries (arch-aware) ------------------------
