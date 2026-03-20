@@ -51,8 +51,11 @@ find_package(a_json_sax_library CONFIG REQUIRED)
 
 # ---- Dependencies (PkgConfig Shims) ----
 
+
 # ── Library variants (ALL are defined & built/installed) ──────────────────────
-add_library(a_json_library_debug  src/ajson.c)
+
+add_library(a_json_library_debug STATIC
+  src/ajson.c)
 
 target_include_directories(a_json_library_debug PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -86,7 +89,9 @@ install(TARGETS a_json_library_debug EXPORT a_json_libraryTargets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-add_library(a_json_library_memory  src/ajson.c)
+
+add_library(a_json_library_memory STATIC
+  src/ajson.c)
 
 target_include_directories(a_json_library_memory PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -123,7 +128,9 @@ install(TARGETS a_json_library_memory EXPORT a_json_libraryTargets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-add_library(a_json_library_static  src/ajson.c)
+
+add_library(a_json_library_static STATIC
+  src/ajson.c)
 
 target_include_directories(a_json_library_static PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -157,7 +164,9 @@ install(TARGETS a_json_library_static EXPORT a_json_libraryTargets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-add_library(a_json_library_shared  src/ajson.c)
+
+add_library(a_json_library_shared SHARED
+  src/ajson.c)
 
 target_include_directories(a_json_library_shared PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
