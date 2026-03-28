@@ -17,11 +17,25 @@ option(A_ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
 
 find_library(M_LIB m)
 
-# ---- Test executables ----
-set(TEST_EXECUTABLES "")
-add_executable(test_ajson  src/test_ajson.c)
+find_package(a_memory_library CONFIG REQUIRED)
+find_package(the_macro_library CONFIG REQUIRED)
+find_package(a_json_sax_library CONFIG REQUIRED)
 
-target_include_directories(test_ajson PRIVATE  ${CMAKE_CURRENT_SOURCE_DIR}/src)
+# Fallback for standalone test builds (when not included via add_subdirectory)
+if(NOT TARGET a_json_library::a_json_library)
+  find_package(a_json_library CONFIG REQUIRED)
+endif()
+
+set(TEST_EXECUTABLES "")
+
+# ---- Targets ----
+add_executable(test_ajson
+  src/test_ajson.c
+)
+
+target_include_directories(test_ajson PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
 
 list(APPEND TEST_EXECUTABLES test_ajson)
 
@@ -36,9 +50,9 @@ if("CXX" IN_LIST CMAKE_PROJECT_LANGUAGES)
   )
 endif()
 
-if(NOT TARGET a_json_library::a_json_library)
-  find_package(a_json_library CONFIG REQUIRED)
-endif()
+target_link_libraries(test_ajson PRIVATE a_memory_library::a_memory_library)
+target_link_libraries(test_ajson PRIVATE the_macro_library::the_macro_library)
+target_link_libraries(test_ajson PRIVATE a_json_sax_library::a_json_sax_library)
 target_link_libraries(test_ajson PRIVATE a_json_library::a_json_library)
 
 if(M_LIB)
