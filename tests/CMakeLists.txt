@@ -42,13 +42,9 @@ list(APPEND TEST_EXECUTABLES test_ajson)
 set_target_properties(test_ajson PROPERTIES
   C_STANDARD 23
   C_STANDARD_REQUIRED YES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED YES
 )
-if("CXX" IN_LIST CMAKE_PROJECT_LANGUAGES)
-  set_target_properties(test_ajson PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED YES
-  )
-endif()
 
 target_link_libraries(test_ajson PRIVATE a_memory_library::a_memory_library)
 target_link_libraries(test_ajson PRIVATE the_macro_library::the_macro_library)
