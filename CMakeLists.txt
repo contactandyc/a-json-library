@@ -8,7 +8,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(a_json_library
-  VERSION 0.1.1
+  VERSION 0.1.2
   LANGUAGES C
 )
 # ── Variant selection for the umbrella alias ──────────────────────────────────
