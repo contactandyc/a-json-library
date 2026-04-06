@@ -1,5 +1,5 @@
 project_title: A JSON Library
-version: 0.1.2
+version: 0.1.3
 stack: c/cmake
 date_created: 2019-08-01
 profile: default-knode
