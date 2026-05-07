@@ -8,9 +8,14 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(a_json_library
-  VERSION 0.1.4
+  VERSION 0.1.5
   LANGUAGES C
 )
+
+if(CMAKE_PREFIX_PATH)
+  include_directories("${CMAKE_PREFIX_PATH}/include")
+  link_directories("${CMAKE_PREFIX_PATH}/lib")
+endif()
 # ── Variant selection for the umbrella alias ──────────────────────────────────
 set(A_BUILD_VARIANT "debug" CACHE STRING
     "Umbrella choice for in-tree linking (debug|memory|static|shared)")
@@ -253,7 +258,11 @@ install(FILES
 # Extra project-specific targets
 
 
-enable_testing()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+  enable_testing()
+  add_subdirectory("tests")
+endif()
 
 # Dynamically mount all subprojects (apps, examples, tests, etc.)
-add_subdirectory(tests)
+# # add_subdirectory(tests)
+# 
